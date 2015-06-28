@@ -44,12 +44,15 @@ import sys
 import time
 from PIL import Image
 import glob
+import random
 
 import numpy
 
 import theano
 import theano.tensor as T
+import theano.printing as P
 
+random.seed(12345)
 
 class LogisticRegression(object):
     """Multi-class Logistic Regression Class
@@ -105,10 +108,12 @@ class LogisticRegression(object):
         # b is a vector where element-k represent the free parameter of hyper
         # plain-k
         self.p_y_given_x = T.nnet.softmax(T.dot(input, self.W) + self.b)
+        
 
         # symbolic description of how to compute prediction as class whose
         # probability is maximal
-        self.y_pred = T.argmax(self.p_y_given_x, axis=1)
+        self.y_pred = T.argmax(P.Print('p_y_given_x')(self.p_y_given_x), axis=1)
+        P.Print('y_pred')(self.y_pred)
         # end-snippet-1
 
         # parameters of the model
@@ -166,32 +171,28 @@ class LogisticRegression(object):
         if y.dtype.startswith('int'):
             # the T.neq operator returns a vector of 0s and 1s, where 1
             # represents a mistake in prediction
-            return T.mean(T.neq(self.y_pred, y))
+            return T.mean(T.neq(P.Print('y_pred')(self.y_pred),
+                                P.Print('y')(y)))
         else:
             raise NotImplementedError()
 
 
-def read_data(dataset, target):
-    
+
+def read_data(dataset):
     files = glob.glob(dataset)
+    random.shuffle(files)
     matrix = []
+    target = []
     for file in files:
         im = Image.open(file)
         matrix.append(list(im.getdata()))
+        target.append(1 if file.find("DCIS") != -1 else 0)
     matrix = numpy.array(matrix)
+    target = numpy.array(target)
     the_set = (matrix, target) # 1 for DCIS, 0 for UDH
     print the_set
     
     return the_set
-
-def make_array(DCIS, UDH):
-    array = []
-    for i in range(0,DCIS):
-        array = numpy.append(array, [1])    
-    for i in range(0,UDH):
-        array = numpy.append(array, [0])
-    array = numpy.array(array)
-    return array
 
 def load_data(dataset):
     ''' Loads the dataset
@@ -240,12 +241,9 @@ def load_data(dataset):
     #DCIS total: 884
     #UDH total: 488
     
-    train_set = read_data('train/*.*', make_array(20,20))
-    valid_set = read_data('valid/*.*', make_array(10,10))
-    test_set = read_data('test/*.*', make_array(10,10))
-    '''train_set = read_data('train/*.*', make_array(2,2))
-    valid_set = read_data('valid/*.*', make_array(2,2))
-    test_set = read_data('test/*.*', make_array(2,2))'''
+    train_set = read_data('train/*.*')
+    valid_set = read_data('valid/*.*')
+    test_set = read_data('test/*.*')
 
     #train_set, valid_set, test_set format: tuple(input, target)
     #input is an numpy.ndarray of 2 dimensions (a matrix)
