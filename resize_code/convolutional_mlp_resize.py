@@ -21,7 +21,6 @@ References:
    http://yann.lecun.com/exdb/publis/pdf/lecun-98.pdf
 
 """
-DSIZE = 400
 
 import os
 import sys
@@ -185,6 +184,14 @@ def train_models(n_epochs, n_train_batches, n_valid_batches, n_test_batches,
     return (best_validation_loss, best_iter, test_score)
 
 def build_models(learning_rate, datasets, nkerns, batch_size):
+    IMG_SIZE = 400
+    L0_FSIZE = 10  # filter size (width and height)
+    L0_PSIZE = 4 # pool size (with and height)
+    L1_FSIZE = 10
+    L1_PSIZE = 4
+    NUM_HIDDEN_UNITS = 500
+    NUM_CATEGORIES = 2 # For digits, this is 10.
+
     rng = numpy.random.RandomState(23455)
     train_set_x, train_set_y = datasets[0]
     valid_set_x, valid_set_y = datasets[1]
@@ -211,34 +218,46 @@ def build_models(learning_rate, datasets, nkerns, batch_size):
     ######################
     print '... building the model'
 
-    # Reshape matrix of rasterized images of shape (batch_size, 28 * 28)
+    # Reshape matrix of rasterized images of shape (batch_size,
+    # IMG_SIZE * IMG_SIZE)
     # to a 4D tensor, compatible with our LeNetConvPoolLayer
-    # (28, 28) is the size of MNIST images.
-    layer0_input = x.reshape((batch_size, 1, DSIZE, DSIZE))
+    # (IMG_SIZE, IMG_SIZE) is the size of MNIST images.
+    layer0_input = x.reshape((batch_size, 1, IMG_SIZE, IMG_SIZE))
 
     # Construct the first convolutional pooling layer:
-    # filtering reduces the image size to (28-5+1 , 28-5+1) = (24, 24)
-    # maxpooling reduces this further to (24/2, 24/2) = (12, 12)
-    # 4D output tensor is thus of shape (batch_size, nkerns[0], 12, 12)
+    # filtering reduces the image size to 
+    #   (IMG_SIZE-L0_FSIZE+1 , IMG_SIZE-L0_FSIZE+1)
+    # maxpooling reduces this further by dividing them by LAYER_0_PSIZE
+    # image size (width and height) of the output from this layer is thus:
+    #    s1 = (IMG_SIZE-L0_FSIZE+1)/L0_PSIZE
+    # 4D output tensor is thus of shape (batch_size, nkerns[0], s1, s1)
     layer0 = LeNetConvPoolLayer(
         rng,
         input=layer0_input,
-        image_shape=(batch_size, 1, DSIZE, DSIZE),
-        filter_shape=(nkerns[0], 1, 5, 5),
-        poolsize=(2, 2)
+        image_shape=(batch_size, 1, IMG_SIZE, IMG_SIZE),
+        filter_shape=(nkerns[0], 1, L0_FSIZE, L0_FSIZE),
+        poolsize=(L0_PSIZE, L0_PSIZE)
     )
 
+    l1_img_size = (IMG_SIZE-L0_FSIZE+1)/L0_PSIZE
+    print("layer 1 image size", l1_img_size)
+
     # Construct the second convolutional pooling layer
-    # filtering reduces the image size to (12-5+1, 12-5+1) = (8, 8)
-    # maxpooling reduces this further to (8/2, 8/2) = (4, 4)
-    # 4D output tensor is thus of shape (batch_size, nkerns[1], 4, 4)
+    # filtering reduces the image size to
+    # (l1_img_size-L1_FSIZE+1 , l1_img_size-L1_FSIZE+1)
+    # maxpooling reduces this further to
+    # l2_img_size = (l1_img_size-L1_FSIZE+1)/L1_PSIZE
+    # 4D output tensor is thus of shape (batch_size, nkerns[1], l2_img_size,
+    #  l2_img_size)
     layer1 = LeNetConvPoolLayer(
         rng,
         input=layer0.output,
-        image_shape=(batch_size, nkerns[0], (DSIZE-4)/2, (DSIZE-4)/2),
-        filter_shape=(nkerns[1], nkerns[0], 5, 5),
-        poolsize=(2, 2)
+        image_shape=(batch_size, nkerns[0], l1_img_size, l1_img_size),
+        filter_shape=(nkerns[1], nkerns[0], L1_FSIZE, L1_FSIZE),
+        poolsize=(L1_PSIZE, L1_PSIZE)
     )
+    l2_img_size = (l1_img_size-L1_FSIZE+1)/L1_PSIZE
+    print("layer 2 image size", l2_img_size)
 
     # the HiddenLayer being fully-connected, it operates on 2D matrices of
     # shape (batch_size, num_pixels) (i.e matrix of rasterized images).
@@ -250,13 +269,14 @@ def build_models(learning_rate, datasets, nkerns, batch_size):
     layer2 = HiddenLayer(
         rng,
         input=layer2_input,
-        n_in=nkerns[1] * ((DSIZE-4)/2-4)/2 * ((DSIZE-4)/2-4)/2,
-        n_out=500,
+        n_in=nkerns[1] * l2_img_size * l2_img_size,
+        n_out=NUM_HIDDEN_UNITS,
         activation=T.tanh
     )
 
     # classify the values of the fully-connected sigmoidal layer
-    layer3 = LogisticRegression(input=layer2.output, n_in=500, n_out=10)
+    layer3 = LogisticRegression(input=layer2.output, n_in=NUM_HIDDEN_UNITS,
+                                n_out=NUM_CATEGORIES)
 
     # the cost we minimize during training is the NLL of the model
     cost = layer3.negative_log_likelihood(y)
