@@ -108,7 +108,6 @@ class LogisticRegression(object):
         # b is a vector where element-k represent the free parameter of hyper
         # plain-k
         self.p_y_given_x = T.nnet.softmax(T.dot(input, self.W) + self.b)
-        
 
         # symbolic description of how to compute prediction as class whose
         # probability is maximal

@@ -22,20 +22,32 @@ References:
 
 """
 
+
 import os
 import sys
 import time
+import random
 
 import numpy
 
 import theano
 import theano.tensor as T
+import theano.printing as P
 from theano.tensor.signal import downsample
 from theano.tensor.nnet import conv
 
 from logistic_sgd_resize import LogisticRegression, load_data
 from mlp_resize import HiddenLayer
 
+# Load gflags to define commandline flags
+sys.path.append('../modules/')
+import gflags
+FLAGS = gflags.FLAGS
+
+gflags.DEFINE_integer('num_epochs', 10, 'Number of epochs to run')
+gflags.DEFINE_integer('batch_size', 10, 'mini batch size of images')
+gflags.DEFINE_enum('model_to_run', 'conv', ['conv', 'mlp', 'lr'],
+                     'Which model to run')
 
 class LeNetConvPoolLayer(object):
     """Pool Layer of a convolutional network """
@@ -113,8 +125,10 @@ class LeNetConvPoolLayer(object):
 
 def train_models(n_epochs, n_train_batches, n_valid_batches, n_test_batches,
 	           train_model, validate_model, test_model):
+    print n_epochs, n_train_batches, n_valid_batches, n_test_batches
+
     # early-stopping parameters
-    patience = 20  # look as this many examples regardless
+    patience = 1000  # look as this many examples regardless
     patience_increase = 2  # wait this much longer when a new best is
                            # found
     improvement_threshold = 0.995  # a relative improvement of this much is
@@ -141,12 +155,17 @@ def train_models(n_epochs, n_train_batches, n_valid_batches, n_test_batches,
             if iter % 100 == 0:
                 print 'training @ iter = ', iter
             cost_ij = train_model(minibatch_index)
+            print "cost_ij", cost_ij
 
             if (iter + 1) % validation_frequency == 0:
 
                 # compute zero-one loss on validation set
+                print "validating: "
                 validation_losses = [validate_model(i) for i
                                      in xrange(n_valid_batches)]
+                print "validation losses: ", validation_losses
+                for i in xrange(n_valid_batches):
+                  print validation_losses[i]
                 this_validation_loss = numpy.mean(validation_losses)
                 print('epoch %i, minibatch %i/%i, validation error %f %%' %
                       (epoch, minibatch_index + 1, n_train_batches,
@@ -176,6 +195,7 @@ def train_models(n_epochs, n_train_batches, n_valid_batches, n_test_batches,
                            test_score * 100.))
             # end if 
 
+            print "patience = ", patience, "iter = ", iter
             if patience <= iter:
                 done_looping = True
                 break
@@ -186,10 +206,10 @@ def train_models(n_epochs, n_train_batches, n_valid_batches, n_test_batches,
 def build_models(learning_rate, datasets, nkerns, batch_size):
     IMG_SIZE = 400
     L0_FSIZE = 10  # filter size (width and height)
-    L0_PSIZE = 4 # pool size (with and height)
+    L0_PSIZE = 5 # pool size (with and height)
     L1_FSIZE = 10
-    L1_PSIZE = 4
-    NUM_HIDDEN_UNITS = 500
+    L1_PSIZE = 5
+    NUM_HIDDEN_UNITS = 10
     NUM_CATEGORIES = 2 # For digits, this is 10.
 
     rng = numpy.random.RandomState(23455)
@@ -264,18 +284,29 @@ def build_models(learning_rate, datasets, nkerns, batch_size):
     # This will generate a matrix of shape (batch_size, nkerns[1] * 4 * 4),
     # or (500, 50 * 4 * 4) = (500, 800) with the default values.
     layer2_input = layer1.output.flatten(2)
+    layer2_size = nkerns[1] * l2_img_size * l2_img_size
+    if FLAGS.model_to_run == 'mlp':
+      layer2_input = x
+      layer2_size = IMG_SIZE * IMG_SIZE
 
     # construct a fully-connected sigmoidal layer
     layer2 = HiddenLayer(
         rng,
         input=layer2_input,
-        n_in=nkerns[1] * l2_img_size * l2_img_size,
+        n_in=layer2_size,
         n_out=NUM_HIDDEN_UNITS,
         activation=T.tanh
     )
 
     # classify the values of the fully-connected sigmoidal layer
-    layer3 = LogisticRegression(input=layer2.output, n_in=NUM_HIDDEN_UNITS,
+    lr_input = layer2.output
+    lr_layer_size = NUM_HIDDEN_UNITS
+    if (FLAGS.model_to_run == 'lr'):
+      # Logistic Regression
+      lr_input = x
+      lr_layer_size = IMG_SIZE * IMG_SIZE
+      
+    layer3 = LogisticRegression(input=lr_input, n_in=lr_layer_size,
                                 n_out=NUM_CATEGORIES)
 
     # the cost we minimize during training is the NLL of the model
@@ -302,6 +333,7 @@ def build_models(learning_rate, datasets, nkerns, batch_size):
 
     # create a list of all model parameters to be fit by gradient descent
     params = layer3.params + layer2.params + layer1.params + layer0.params
+    params = layer3.params
 
     # create a list of gradients for all model parameters
     grads = T.grad(cost, params)
@@ -312,7 +344,7 @@ def build_models(learning_rate, datasets, nkerns, batch_size):
     # create the updates list by automatically looping over all
     # (params[i], grads[i]) pairs.
     updates = [
-        (param_i, param_i - learning_rate * grad_i)
+        (param_i, P.Print("params")(param_i) - learning_rate * P.Print("grad")(grad_i))
         for param_i, grad_i in zip(params, grads)
     ]
 
@@ -330,9 +362,9 @@ def build_models(learning_rate, datasets, nkerns, batch_size):
             train_model, validate_model, test_model)
 
 
-def evaluate_lenet5(learning_rate=0.1, n_epochs=3,
+def evaluate_lenet5(learning_rate=0.5, n_epochs=FLAGS.num_epochs,
                     dataset='mnist.pkl.gz',
-                    nkerns=[20, 50], batch_size=5):
+                    nkerns=[20, 50], batch_size=FLAGS.batch_size):
     """ Demonstrates lenet on MNIST dataset
 
     :type learning_rate: float
@@ -348,7 +380,6 @@ def evaluate_lenet5(learning_rate=0.1, n_epochs=3,
     :type nkerns: list of ints
     :param nkerns: number of kernels on each layer
     """
-
 
     datasets = load_data(dataset)
 
@@ -375,8 +406,16 @@ def evaluate_lenet5(learning_rate=0.1, n_epochs=3,
                           os.path.split(__file__)[1] +
                           ' ran for %.2fm' % ((end_time - start_time) / 60.))
 
+def main(argv):
+    try:
+      argv = FLAGS(argv)  # parse flags
+    except gflags.FlagsError, e:
+      print '%s\\nUsage: %s ARGS\\n%s' % (e, sys.argv[0], FLAGS)
+      sys.exit(1)
+    evaluate_lenet5(n_epochs=FLAGS.num_epochs, batch_size=FLAGS.batch_size)
+
 if __name__ == '__main__':
-    evaluate_lenet5()
+    main(sys.argv)
 
 
 def experiment(state, channel):
